@@ -1,0 +1,206 @@
+[
+    {
+        "id": 1,
+        "question_var": "hAGE",
+        "question_text": "hAge. What is your age",
+        "base_text": "Total Respondents",
+        "display_structure": [
+            [
+                "code",
+                "18-34",
+                1
+            ],
+            [
+                "code",
+                "35-54",
+                2
+            ],
+            [
+                "code",
+                "55+",
+                3
+            ]
+        ],
+        "base_filter": null,
+        "question_type": "single",
+        "mean_var": "S1",
+        "show_sigma": true
+    },
+    {
+        "id": 2,
+        "question_var": "S5",
+        "question_text": "S5. You mentioned that you subscribe to a cable or satellite TV provider. Which of the following do you subscribe to? ",
+        "base_text": "Total Respondents",
+        "display_structure": [
+            [
+                "net",
+                "All not DIRECTV (NET)",
+                [
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    7,
+                    8,
+                    9,
+                    10,
+                    99
+                ]
+            ],
+            [
+                "code",
+                "Altice/Suddenlink/Cablevision ",
+                1
+            ],
+            [
+                "code",
+                "Charter/Spectrum ",
+                2
+            ],
+            [
+                "code",
+                "COX",
+                3
+            ],
+            [
+                "code",
+                "CenturyLink/Qwest",
+                4
+            ],
+            [
+                "code",
+                "Comcast/Xfinity",
+                5
+            ],
+            [
+                "code",
+                "DIRECTV (satellite)",
+                6
+            ],
+            [
+                "code",
+                "DISH Network (satellite) ",
+                7
+            ],
+            [
+                "code",
+                "Frontier",
+                8
+            ],
+            [
+                "code",
+                "Verizon FiOS",
+                9
+            ],
+            [
+                "code",
+                "Mediacom (including Earthlink)",
+                10
+            ],
+            [
+                "code",
+                "Other",
+                99
+            ],
+            [
+                "code",
+                "None of the above",
+                100
+            ]
+        ],
+        "base_filter": "S4r1==1",
+        "question_type": "single",
+        "mean_var": null,
+        "show_sigma": true
+    },
+    {
+        "id": 3,
+        "question_var": "hGender",
+        "question_text": "hGender. What is your gender?",
+        "base_text": "Total Respondents",
+        "display_structure": [
+            [
+                "code",
+                "Male ",
+                1
+            ],
+            [
+                "code",
+                "Female",
+                2
+            ]
+        ],
+        "base_filter": null,
+        "question_type": "single",
+        "mean_var": null,
+        "show_sigma": true
+    },
+    {
+        "id": 4,
+        "question_var": [
+            "S3r1",
+            "S3r2",
+            "S3r3",
+            "S3r4",
+            "S3r5",
+            "S3r6",
+            "S3r7",
+            "S3r8",
+            "S3r9"
+        ],
+        "question_text": "S3. We are interested in getting feedback from people who work in a variety of areas. Do you, or does anyone in your family or household work in any of the following industries?",
+        "base_text": "Total Respondents",
+        "display_structure": [
+            [
+                "code",
+                "In advertising, public relations, or journalism",
+                "S3r1"
+            ],
+            [
+                "code",
+                "In marketing or market research",
+                "S3r2"
+            ],
+            [
+                "code",
+                "For a telecommunications company",
+                "S3r3"
+            ],
+            [
+                "code",
+                "In financial services/banking",
+                "S3r4"
+            ],
+            [
+                "code",
+                "In education",
+                "S3r5"
+            ],
+            [
+                "code",
+                "In hospitality/travel/tourism",
+                "S3r6"
+            ],
+            [
+                "code",
+                "In government/public service",
+                "S3r7"
+            ],
+            [
+                "code",
+                "In retail",
+                "S3r8"
+            ],
+            [
+                "code",
+                "None of the above",
+                "S3r9"
+            ]
+        ],
+        "base_filter": null,
+        "question_type": "single",
+        "mean_var": "S1",
+        "show_sigma": true
+    }
+]
