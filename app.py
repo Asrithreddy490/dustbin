@@ -1,5 +1,4 @@
-#python -m streamlit run app.py run this in terminal to run the app ("http://localhost:8501") 
-
+# app.py
 import streamlit as st
 import json
 import os
@@ -7,286 +6,429 @@ from datetime import datetime
 import pandas as pd
 from tab_generator import TabGenerator, clean_blank_and_convert_to_numeric
 from datamap_parser import parse_datamap_to_json
+import pyreadstat  # Add this with other imports
 
+# Constants
 JSON_FILE = "questions_master.json"
+DEFAULT_DATA_FILE = "Final_CE_10042023_V3.csv"
+DEFAULT_STUDY_NAME = "DTV-010 Feature Prioritization"
+DEFAULT_CLIENT_NAME = "PEERLESS INSIGHTS"
 
 # ----------------------
 # Helper functions
 # ----------------------
 def load_questions():
-    """Load questions from local JSON file."""
-    if os.path.exists(JSON_FILE):
-        with open(JSON_FILE, "r") as f:
-            return json.load(f)
-    return []
+    """Load questions from local JSON file with error handling."""
+    try:
+        if os.path.exists(JSON_FILE):
+            with open(JSON_FILE, "r", encoding='utf-8') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        st.error(f"Error loading questions: {str(e)}")
+        return []
 
 def save_questions(questions):
-    """Save questions to local JSON file."""
-    with open(JSON_FILE, "w") as f:
-        json.dump(questions, f, indent=4)
+    """Save questions to local JSON file with error handling."""
+    try:
+        with open(JSON_FILE, "w", encoding='utf-8') as f:
+            json.dump(questions, f, indent=4, ensure_ascii=False)
+        return True
+    except Exception as e:
+        st.error(f"Error saving questions: {str(e)}")
+        return False
+
+def validate_display_structure(structure):
+    """Validate the display structure format."""
+    if not isinstance(structure, list):
+        return False
+    for item in structure:
+        if not (isinstance(item, (list, tuple)) and len(item) >= 3):
+            return False
+        if item[0] not in ["code", "net"]:
+            return False
+    return True
 
 # ----------------------
-# Load existing data
+# Initialize session state
 # ----------------------
-questions = load_questions()
-
-st.title("Survey Table Config Manager")
-# Add new section for datamap import
-st.header("Import from Datamap")
-uploaded_file = st.file_uploader("Upload Datamap Excel File", type=["xlsx"])
-
-if uploaded_file is not None:
-    if st.button("Generate Questions from Datamap"):
-        try:
-            with st.spinner("Processing datamap..."):
-                new_questions = parse_datamap_to_json(uploaded_file)
-                
-                # Get next available ID
-                existing_ids = [q['id'] for q in questions] if questions else [0]
-                start_id = max(existing_ids) + 1
-                
-                # Update IDs to avoid conflicts
-                for i, q in enumerate(new_questions):
-                    q['id'] = start_id + i
-                
-                questions.extend(new_questions)
-                save_questions(questions)
-                
-            st.success(f"Added {len(new_questions)} new questions from datamap!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error processing datamap: {str(e)}")
-st.header("Configuration Section")
-data_file = st.text_input("Data File Path", value="Final_CE_10042023_V3.csv")
-study_name = st.text_input("Study Name", value="DTV-010 Feature Prioritization")
-client_name = st.text_input("Client Name", value="PEERLESS INSIGHTS")
+if 'questions' not in st.session_state:
+    st.session_state.questions = load_questions()
 
 # ----------------------
-# Sidebar - View / Select Questions
+# UI Layout
 # ----------------------
-st.sidebar.header("Stored Questions")
+st.set_page_config(layout="wide", page_title="Survey Table Config Manager")
+st.title("📊 Survey Table Config Manager")
 
-if questions:
-    question_options = {f"ID {q['id']} - {q['question_text']}": q['id'] for q in questions}
-    selected_label = st.sidebar.selectbox("Select Question", list(question_options.keys()))
+# Sidebar - View/Select Questions
+st.sidebar.header("🔍 Stored Questions")
+
+if st.session_state.questions:
+    question_options = {f"ID {q['id']} - {q['question_text'][:30]}...": q['id'] 
+                      for q in st.session_state.questions}
+    selected_label = st.sidebar.selectbox(
+        "Select Question", 
+        list(question_options.keys()),
+        key="question_select"
+    )
     selected_id = question_options[selected_label]
 
     col1, col2 = st.sidebar.columns(2)
-    if col1.button("Edit"):
+    if col1.button("✏️ Edit", key="edit_btn"):
         st.session_state.edit_id = selected_id
-    if col2.button("Delete"):
-        questions = [q for q in questions if q['id'] != selected_id]
-        save_questions(questions)
-        st.sidebar.success(f"Deleted question ID {selected_id}")
         st.rerun()
+    if col2.button("🗑️ Delete", key="delete_btn"):
+        st.session_state.questions = [q for q in st.session_state.questions 
+                                    if q['id'] != selected_id]
+        if save_questions(st.session_state.questions):
+            st.sidebar.success(f"Deleted question ID {selected_id}")
+            st.rerun()
 else:
-    st.sidebar.write("No questions stored yet.")
+    st.sidebar.info("ℹ️ No questions stored yet. Import or add new questions below.")
+
+# Main content tabs
+tab1, tab2, tab3 = st.tabs(["📥 Import Questions", "✏️ Add/Edit Questions", "📊 Generate Tables"])
 
 # ----------------------
-# Add/Edit Question Form
+# Tab 1: Import Questions
 # ----------------------
-st.header("Add / Edit Question")
-
-if "edit_id" in st.session_state:
-    # Load question for editing
-    q_to_edit = next((q for q in questions if q['id'] == st.session_state.edit_id), None)
-    if q_to_edit:
-        question_var_default = ",".join(q_to_edit['question_var']) if isinstance(q_to_edit['question_var'], list) else q_to_edit['question_var']
-        question_text_default = q_to_edit['question_text']
-        base_text_default = q_to_edit['base_text']
-        display_structure_default = json.dumps(q_to_edit['display_structure'], indent=4)
-        base_filter_default = q_to_edit['base_filter'] if q_to_edit['base_filter'] else ""
-        question_type_default = q_to_edit['question_type']
-        mean_var_default = q_to_edit['mean_var'] if q_to_edit['mean_var'] else ""
-        show_sigma_default = q_to_edit.get("show_sigma", True)
-    else:
-        st.session_state.pop("edit_id", None)
-        st.warning("Question not found for editing.")
-        st.stop()
-else:
-    # Defaults for new entry
-    question_var_default = ""
-    question_text_default = ""
-    base_text_default = "Total Respondents"
-    display_structure_default = json.dumps([
-        ["code", "Male", 1],
-        ["code", "Female", 2],
-        ["net", "All Genders", [1, 2]]
-    ], indent=4)
-    base_filter_default = ""
-    question_type_default = "single"
-    mean_var_default = ""
-    show_sigma_default = True
-
-with st.form("question_form"):
-    question_var = st.text_input("Question Variable", value=question_var_default)
-    question_text = st.text_input("Question Text", value=question_text_default)
-    base_text = st.text_input("Base Text", value=base_text_default)
-    display_structure_text = st.text_area(
-        "Display Structure (JSON list of [type, label, code(s)])",
-        value=display_structure_default,
-        height=300,
-        help="Example:\n"
-             "[\n"
-             "  [\"code\", \"Very Good\", 1],\n"
-             "  [\"code\", \"Good\", 2],\n"
-             "  [\"net\", \"Top 2 Box (NET)\", [1, 2]]\n"
-             "]"
+with tab1:
+    st.header("Import from Datamap")
+    uploaded_file = st.file_uploader(
+        "Upload Datamap Excel File", 
+        type=["xlsx"],
+        help="Upload your survey datamap Excel file to automatically generate question configurations"
     )
-    base_filter = st.text_input("Base Filter (optional)", value=base_filter_default)
-    question_type = st.selectbox("Question Type", ["single", "multi", "open_numeric"], 
-                                 index=["single", "multi", "open_numeric"].index(question_type_default))
-    mean_var = st.text_input("Mean Var (optional)", value=mean_var_default)
-    show_sigma = st.checkbox("Show Sigma", value=show_sigma_default)
 
-    submitted = st.form_submit_button("Save Question")
+    if uploaded_file is not None:
+        if st.button("⚡ Generate Questions from Datamap", type="primary"):
+            try:
+                with st.spinner("🔍 Processing datamap..."):
+                    new_questions = parse_datamap_to_json(uploaded_file)
+                    
+                    # Get next available ID
+                    existing_ids = [q['id'] for q in st.session_state.questions] if st.session_state.questions else [0]
+                    start_id = max(existing_ids) + 1
+                    
+                    # Update IDs to avoid conflicts
+                    for i, q in enumerate(new_questions):
+                        q['id'] = start_id + i
+                    
+                    st.session_state.questions.extend(new_questions)
+                    if save_questions(st.session_state.questions):
+                        st.success(f"✅ Added {len(new_questions)} new questions from datamap!")
+                        st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error processing datamap: {str(e)}")
+                st.exception(e)
 
-    if submitted:
-        try:
-            display_structure_raw = json.loads(display_structure_text)
-            # Ensure tuples
-            display_structure = [tuple(item) for item in display_structure_raw]
-        except Exception:
-            st.error("Display Structure must be valid JSON in the format: [[\"code\", \"Label\", 1], [\"net\", \"Label\", [1,2]]]")
-            st.stop()
+# ----------------------
+# Tab 2: Add/Edit Question
+# ----------------------
+with tab2:
+    st.header("Add / Edit Question")
+    
+    # Initialize form defaults
+    form_defaults = {
+        "question_var": "",
+        "question_text": "",
+        "base_text": "Total Respondents",
+        "display_structure": [
+            ["code", "Male", 1],
+            ["code", "Female", 2],
+            ["net", "All Genders", [1, 2]]
+        ],
+        "base_filter": "",
+        "question_type": "single",
+        "mean_var": "",
+        "show_sigma": True
+    }
 
-        if "edit_id" in st.session_state:
-            for q in questions:
-                if q['id'] == st.session_state.edit_id:
-                    q['question_var'] = question_var.split(",") if "," in question_var else question_var
-                    q['question_text'] = question_text
-                    q['base_text'] = base_text
-                    q['display_structure'] = display_structure
-                    q['base_filter'] = base_filter if base_filter else None
-                    q['question_type'] = question_type
-                    q['mean_var'] = mean_var if mean_var else None
-                    q['show_sigma'] = show_sigma
-                    break
-            save_questions(questions)
-            st.success(f"Question ID {st.session_state.edit_id} updated!")
-            st.session_state.pop("edit_id", None)
+    # Load question for editing if in edit mode
+    if "edit_id" in st.session_state:
+        q_to_edit = next((q for q in st.session_state.questions 
+                         if q['id'] == st.session_state.edit_id), None)
+        if q_to_edit:
+            form_defaults.update({
+                "question_var": ",".join(q_to_edit['question_var']) 
+                              if isinstance(q_to_edit['question_var'], list) 
+                              else q_to_edit['question_var'],
+                "question_text": q_to_edit['question_text'],
+                "base_text": q_to_edit['base_text'],
+                "display_structure": q_to_edit['display_structure'],
+                "base_filter": q_to_edit['base_filter'] or "",
+                "question_type": q_to_edit['question_type'],
+                "mean_var": q_to_edit['mean_var'] or "",
+                "show_sigma": q_to_edit.get("show_sigma", True)
+            })
         else:
-            new_id = max([q['id'] for q in questions], default=0) + 1
-            new_question = {
-                "id": new_id,
-                "question_var": question_var.split(",") if "," in question_var else question_var,
+            st.warning("Question not found for editing.")
+            st.session_state.pop("edit_id", None)
+
+    with st.form("question_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            question_var = st.text_input(
+                "Question Variable*",
+                value=form_defaults["question_var"],
+                help="Variable name(s) from dataset. Separate multiple with commas for multi-select questions"
+            )
+            question_text = st.text_input(
+                "Question Text*",
+                value=form_defaults["question_text"],
+                help="The text that will appear as the question title in tables"
+            )
+            base_text = st.text_input(
+                "Base Text*",
+                value=form_defaults["base_text"],
+                help="Base description (e.g., 'Total Respondents')"
+            )
+            question_type = st.selectbox(
+                "Question Type*",
+                ["single", "multi", "open_numeric"],
+                index=["single", "multi", "open_numeric"].index(form_defaults["question_type"]),
+                help="Single-select, Multi-select, or Open Numeric question"
+            )
+            
+        with col2:
+            display_structure = st.text_area(
+                "Display Structure (JSON)*",
+                value=json.dumps(form_defaults["display_structure"], indent=2),
+                height=200,
+                help="""Format: [["type", "label", code(s)]]
+Example:
+[
+  ["code", "Very Good", 1],
+  ["code", "Good", 2],
+  ["net", "Top 2 Box (NET)", [1, 2]]
+]"""
+            )
+            base_filter = st.text_input(
+                "Base Filter",
+                value=form_defaults["base_filter"],
+                help="Optional filter condition (e.g., 'Q1 == 1')"
+            )
+            mean_var = st.text_input(
+                "Mean Variable",
+                value=form_defaults["mean_var"],
+                help="Optional variable for calculating means"
+            )
+            show_sigma = st.checkbox(
+                "Show Sigma",
+                value=form_defaults["show_sigma"],
+                help="Show statistical significance testing"
+            )
+
+        submitted = st.form_submit_button("💾 Save Question", type="primary")
+
+        if submitted:
+            # Validate required fields
+            if not all([question_var, question_text, base_text, display_structure]):
+                st.error("Please fill in all required fields (*)")
+                st.stop()
+
+            try:
+                display_structure_parsed = json.loads(display_structure)
+                if not validate_display_structure(display_structure_parsed):
+                    st.error("Invalid display structure format")
+                    st.stop()
+            except json.JSONDecodeError:
+                st.error("Display Structure must be valid JSON")
+                st.stop()
+
+            # Prepare question data
+            question_data = {
+                "question_var": [v.strip() for v in question_var.split(",")] 
+                              if "," in question_var else question_var,
                 "question_text": question_text,
                 "base_text": base_text,
-                "display_structure": display_structure,
+                "display_structure": display_structure_parsed,
                 "base_filter": base_filter if base_filter else None,
                 "question_type": question_type,
                 "mean_var": mean_var if mean_var else None,
                 "show_sigma": show_sigma
             }
-            questions.append(new_question)
-            save_questions(questions)
-            st.success(f"Question saved with ID {new_id}!")
+
+            if "edit_id" in st.session_state:
+                # Update existing question
+                for q in st.session_state.questions:
+                    if q['id'] == st.session_state.edit_id:
+                        q.update(question_data)
+                        break
+                success_msg = f"Question ID {st.session_state.edit_id} updated!"
+                st.session_state.pop("edit_id", None)
+            else:
+                # Add new question
+                new_id = max([q['id'] for q in st.session_state.questions], default=0) + 1
+                question_data["id"] = new_id
+                st.session_state.questions.append(question_data)
+                success_msg = f"Question saved with ID {new_id}!"
+
+            if save_questions(st.session_state.questions):
+                st.success(success_msg)
+                st.rerun()
 
 # ----------------------
-# Generate Tables Section
+# Tab 3: Generate Tables
 # ----------------------
-st.header("Generate Tables")
- 
-if st.button("Generate Output Tables"):
-    try:
-        # Load the data file
-        ext = os.path.splitext(data_file)[1].lower()
-        
-        if ext == ".csv":
-            first_data = pd.read_csv(data_file)
-        elif ext in [".xls", ".xlsx"]:
-            first_data = pd.read_excel(data_file)
-        elif ext == ".sav":
-            first_data = pd.read_spss(data_file)
-        else:
-            raise ValueError(f"Unsupported file format: {ext}")
-            
-        # Process the data
-        first_data = first_data.set_index(keys=["record","uuid"]).sort_index()
-        #first_data = clean_blank_and_convert_to_numeric(first_data)  # Make sure this function is defined
-        
-        # Get current date info
-        now = datetime.now()
-        month = now.strftime("%B")
-        year = now.year
-        
-        # Define banner segments
-        banner_segments = [
-            {"id": "A", "label": "Total", "condition": None},
-            {"id": "B", "label": "Gen Pop Sample", "condition": "vboost == 1"},
-            {"id": "C", "label": "MVPD Users", "condition": "hMVPD == 2"},
-            {"id": "D", "label": "vMVPD Users", "condition": "S6r1 == 1 or S6r2 == 1 or S6r3 == 1 or S6r4 == 1 or S6r5 == 1 or S6r6 == 1 or S6r7 == 1 or S6r8 == 1 or S6r9 == 1"},
-            {"id": "E", "label": "Male", "condition": "hGender == 1 and vboost == 1"},    
-            {"id": "F", "label": "Female", "condition": "hGender == 2 and vboost == 1"},
-        ]
-        
-        results = []
-        
-        for i, table in enumerate(questions, start=1):
-            tg = TabGenerator(
-                client_name=client_name,
-                study_name=study_name,
-                month=month,
-                year=year,
-                first_data=first_data,
-                question_var=table["question_var"],
-                question_text=table["question_text"],
-                base_text=table["base_text"],
-                display_structure=table["display_structure"],
-                question_type=table["question_type"],
-                table_number=i,
-                mean_var=table["mean_var"],
-                filter_condition=table["base_filter"],
-                show_sigma=table["show_sigma"]
+with tab3:
+    st.header("Generate Output Tables")
+    
+    with st.expander("⚙️ Configuration", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            data_file = st.text_input(
+                "Data File Path*",
+                value=DEFAULT_DATA_FILE,
+                help="Path to your data file (CSV, Excel, or SPSS)"
             )
-            
-            cross_tab_df = tg.generate_crosstab(banner_segments, tg.display_structure)
-            
-            metadata = pd.DataFrame([
-                [""],
-                ["#page"],
-                [client_name],
-                [study_name],
-                [f"{month} {year}"],
-                [f"Table {i}"],
-                [table["question_text"]],
-                [f"Base: {table['base_text']}"]
-            ], columns=["Label"]).reindex(columns=cross_tab_df.columns, fill_value="")
-            
-            banner_labels_row = [""] + [seg["label"] for seg in banner_segments]
-            banner_ids_row = [""] + [seg["id"] for seg in banner_segments]
-            
-            banner_labels_row.extend([""] * (len(cross_tab_df.columns) - len(banner_labels_row)))
-            banner_ids_row.extend([""] * (len(cross_tab_df.columns) - len(banner_ids_row)))
-            
-            full_table = pd.concat([
-                metadata,
-                pd.DataFrame([[""] * len(cross_tab_df.columns)], columns=cross_tab_df.columns),
-                pd.DataFrame([banner_labels_row], columns=cross_tab_df.columns),
-                pd.DataFrame([banner_ids_row], columns=cross_tab_df.columns),
-                cross_tab_df
-            ], ignore_index=True)
-            
-            results.append(full_table)
-        
-        # Save the output
-        today = datetime.today().strftime('%m%d%Y')
-        file_name = f"DTV-010_Output_Python_Tab_{today}.csv"
-        
-        if results:
-            final_df = pd.concat(results, ignore_index=True)
-            final_df.to_csv(file_name, index=False, header=False)
-            final_df.to_csv("tabs_output.csv", index=False, header=False)
-            st.success(f"Output saved to {file_name}")
-        else:
-            st.warning("No tables were generated. Please add questions to the config.")
-            
-    except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
- 
+        with col2:
+            study_name = st.text_input(
+                "Study Name*",
+                value=DEFAULT_STUDY_NAME
+            )
+        with col3:
+            client_name = st.text_input(
+                "Client Name*",
+                value=DEFAULT_CLIENT_NAME
+            )
+
+    # Banner configuration
+    st.subheader("Banner Configuration")
+    banner_config = [
+        {"id": "A", "label": "Total", "condition": None},
+        {"id": "B", "label": "Gen Pop Sample", "condition": "vboost == 1"},
+        {"id": "C", "label": "MVPD Users", "condition": "hMVPD == 2"},
+        {"id": "D", "label": "vMVPD Users", "condition": "S6r1 == 1 or S6r2 == 1 or S6r3 == 1 or S6r4 == 1 or S6r5 == 1 or S6r6 == 1 or S6r7 == 1 or S6r8 == 1 or S6r9 == 1"},
+        {"id": "E", "label": "Male", "condition": "hGender == 1 and vboost == 1"},    
+        {"id": "F", "label": "Female", "condition": "hGender == 2 and vboost == 1"},
+    ]
+    
+    if st.button("✨ Generate Tables", type="primary", disabled=not st.session_state.questions):
+        if not all([data_file, study_name, client_name]):
+            st.error("Please fill in all required configuration fields (*)")
+            st.stop()
+
+        if not os.path.exists(data_file):
+            st.error(f"Data file not found at: {data_file}")
+            st.stop()
+
+        try:
+            with st.spinner("⏳ Generating tables..."):
+                # Load data
+                ext = os.path.splitext(data_file)[1].lower()
+                if ext == ".csv":
+                    data = pd.read_csv(data_file)
+                elif ext == ".xls":
+                    try:
+                        data = pd.read_excel(data_file, engine='xlrd')
+                    except ImportError:
+                        st.error("❌ xlrd package required for .xls files")
+                        st.info("Please run: pip install xlrd")
+                        st.stop()
+                elif ext == ".xlsx":
+                    try:
+                        data = pd.read_excel(data_file, engine='openpyxl')
+                    except ImportError:
+                        st.error("❌ openpyxl package required for .xlsx files")
+                        st.info("Please run: pip install openpyxl")
+                        st.stop()
+                elif ext == ".sav":
+                    try:
+                        data, _ = pyreadstat.read_sav(data_file)
+                    except Exception as e:
+                        st.error(f"❌ Failed to read SPSS file: {str(e)}")
+                        st.info("Try exporting your data to CSV/Excel and re-uploading")
+                        st.stop()
+                else:
+                    raise ValueError(f"Unsupported file format: {ext}")
+
+                # Process data
+                data = data.set_index(keys=["record","uuid"]).sort_index()
+                data = clean_blank_and_convert_to_numeric(data)
+
+                # Get current date
+                now = datetime.now()
+                month = now.strftime("%B")
+                year = now.year
+
+                # Generate tables
+                results = []
+                for i, question in enumerate(st.session_state.questions, start=1):
+                    tg = TabGenerator(
+                        client_name=client_name,
+                        study_name=study_name,
+                        month=month,
+                        year=year,
+                        first_data=data,
+                        question_var=question["question_var"],
+                        question_text=question["question_text"],
+                        base_text=question["base_text"],
+                        display_structure=question["display_structure"],
+                        question_type=question["question_type"],
+                        table_number=i,
+                        mean_var=question["mean_var"],
+                        filter_condition=question["base_filter"],
+                        show_sigma=question["show_sigma"]
+                    )
+                    
+                    cross_tab_df = tg.generate_crosstab(banner_config, tg.display_structure)
+                    
+                    # Prepare metadata rows
+                    metadata = pd.DataFrame([
+                        [""],
+                        ["#page"],
+                        [client_name],
+                        [study_name],
+                        [f"{month} {year}"],
+                        [f"Table {i}"],
+                        [question["question_text"]],
+                        [f"Base: {question['base_text']}"]
+                    ], columns=["Label"]).reindex(columns=cross_tab_df.columns, fill_value="")
+                    
+                    # Prepare banner rows
+                    banner_labels = [""] + [seg["label"] for seg in banner_config]
+                    banner_ids = [""] + [seg["id"] for seg in banner_config]
+                    
+                    # Combine all components
+                    full_table = pd.concat([
+                        metadata,
+                        pd.DataFrame([[""] * len(cross_tab_df.columns)], columns=cross_tab_df.columns),
+                        pd.DataFrame([banner_labels], columns=cross_tab_df.columns),
+                        pd.DataFrame([banner_ids], columns=cross_tab_df.columns),
+                        cross_tab_df
+                    ], ignore_index=True)
+                    
+                    results.append(full_table)
+
+                # Save output
+                today = datetime.today().strftime('%m%d%Y')
+                file_name = f"{study_name.replace(' ', '_')}_Output_Tables_{today}.csv"
+                
+                if results:
+                    final_df = pd.concat(results, ignore_index=True)
+                    final_df.to_csv(file_name, index=False, header=False)
+                    st.success(f"✅ Tables generated successfully! Saved to: {file_name}")
+                    
+                    # Provide download button
+                    with open(file_name, "rb") as f:
+                        st.download_button(
+                            label="⬇️ Download Tables",
+                            data=f,
+                            file_name=file_name,
+                            mime="text/csv"
+                        )
+                else:
+                    st.warning("No tables were generated")
+
+        except Exception as e:
+            st.error(f"❌ Error generating tables: {str(e)}")
+            st.exception(e)
+
 # ----------------------
-# Display Current Questions
+# Current Questions Display
 # ----------------------
-st.markdown("### Current Questions in Database")
-st.json(questions)
- 
+with st.expander("📋 View Current Questions (JSON)"):
+    st.json(st.session_state.questions)
