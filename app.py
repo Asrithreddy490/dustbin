@@ -3,6 +3,10 @@
 import streamlit as st
 import json
 import os
+from datetime import datetime
+import pandas as pd
+from tab_generator import TabGenerator, clean_blank_and_convert_to_numeric
+from datamap_parser import parse_datamap_to_json
 
 JSON_FILE = "questions_master.json"
 
@@ -27,6 +31,35 @@ def save_questions(questions):
 questions = load_questions()
 
 st.title("Survey Table Config Manager")
+# Add new section for datamap import
+st.header("Import from Datamap")
+uploaded_file = st.file_uploader("Upload Datamap Excel File", type=["xlsx"])
+
+if uploaded_file is not None:
+    if st.button("Generate Questions from Datamap"):
+        try:
+            with st.spinner("Processing datamap..."):
+                new_questions = parse_datamap_to_json(uploaded_file)
+                
+                # Get next available ID
+                existing_ids = [q['id'] for q in questions] if questions else [0]
+                start_id = max(existing_ids) + 1
+                
+                # Update IDs to avoid conflicts
+                for i, q in enumerate(new_questions):
+                    q['id'] = start_id + i
+                
+                questions.extend(new_questions)
+                save_questions(questions)
+                
+            st.success(f"Added {len(new_questions)} new questions from datamap!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error processing datamap: {str(e)}")
+st.header("Configuration Section")
+data_file = st.text_input("Data File Path", value="Final_CE_10042023_V3.csv")
+study_name = st.text_input("Study Name", value="DTV-010 Feature Prioritization")
+client_name = st.text_input("Client Name", value="PEERLESS INSIGHTS")
 
 # ----------------------
 # Sidebar - View / Select Questions
@@ -92,7 +125,7 @@ with st.form("question_form"):
     display_structure_text = st.text_area(
         "Display Structure (JSON list of [type, label, code(s)])",
         value=display_structure_default,
-        height=600,
+        height=300,
         help="Example:\n"
              "[\n"
              "  [\"code\", \"Very Good\", 1],\n"
@@ -101,8 +134,8 @@ with st.form("question_form"):
              "]"
     )
     base_filter = st.text_input("Base Filter (optional)", value=base_filter_default)
-    question_type = st.selectbox("Question Type", ["single", "multi", "numeric"], 
-                                 index=["single", "multi", "numeric"].index(question_type_default))
+    question_type = st.selectbox("Question Type", ["single", "multi", "open_numeric"], 
+                                 index=["single", "multi", "open_numeric"].index(question_type_default))
     mean_var = st.text_input("Mean Var (optional)", value=mean_var_default)
     show_sigma = st.checkbox("Show Sigma", value=show_sigma_default)
 
@@ -149,5 +182,111 @@ with st.form("question_form"):
             save_questions(questions)
             st.success(f"Question saved with ID {new_id}!")
 
+# ----------------------
+# Generate Tables Section
+# ----------------------
+st.header("Generate Tables")
+ 
+if st.button("Generate Output Tables"):
+    try:
+        # Load the data file
+        ext = os.path.splitext(data_file)[1].lower()
+        
+        if ext == ".csv":
+            first_data = pd.read_csv(data_file)
+        elif ext in [".xls", ".xlsx"]:
+            first_data = pd.read_excel(data_file)
+        elif ext == ".sav":
+            first_data = pd.read_spss(data_file)
+        else:
+            raise ValueError(f"Unsupported file format: {ext}")
+            
+        # Process the data
+        first_data = first_data.set_index(keys=["record","uuid"]).sort_index()
+        #first_data = clean_blank_and_convert_to_numeric(first_data)  # Make sure this function is defined
+        
+        # Get current date info
+        now = datetime.now()
+        month = now.strftime("%B")
+        year = now.year
+        
+        # Define banner segments
+        banner_segments = [
+            {"id": "A", "label": "Total", "condition": None},
+            {"id": "B", "label": "Gen Pop Sample", "condition": "vboost == 1"},
+            {"id": "C", "label": "MVPD Users", "condition": "hMVPD == 2"},
+            {"id": "D", "label": "vMVPD Users", "condition": "S6r1 == 1 or S6r2 == 1 or S6r3 == 1 or S6r4 == 1 or S6r5 == 1 or S6r6 == 1 or S6r7 == 1 or S6r8 == 1 or S6r9 == 1"},
+            {"id": "E", "label": "Male", "condition": "hGender == 1 and vboost == 1"},    
+            {"id": "F", "label": "Female", "condition": "hGender == 2 and vboost == 1"},
+        ]
+        
+        results = []
+        
+        for i, table in enumerate(questions, start=1):
+            tg = TabGenerator(
+                client_name=client_name,
+                study_name=study_name,
+                month=month,
+                year=year,
+                first_data=first_data,
+                question_var=table["question_var"],
+                question_text=table["question_text"],
+                base_text=table["base_text"],
+                display_structure=table["display_structure"],
+                question_type=table["question_type"],
+                table_number=i,
+                mean_var=table["mean_var"],
+                filter_condition=table["base_filter"],
+                show_sigma=table["show_sigma"]
+            )
+            
+            cross_tab_df = tg.generate_crosstab(banner_segments, tg.display_structure)
+            
+            metadata = pd.DataFrame([
+                [""],
+                ["#page"],
+                [client_name],
+                [study_name],
+                [f"{month} {year}"],
+                [f"Table {i}"],
+                [table["question_text"]],
+                [f"Base: {table['base_text']}"]
+            ], columns=["Label"]).reindex(columns=cross_tab_df.columns, fill_value="")
+            
+            banner_labels_row = [""] + [seg["label"] for seg in banner_segments]
+            banner_ids_row = [""] + [seg["id"] for seg in banner_segments]
+            
+            banner_labels_row.extend([""] * (len(cross_tab_df.columns) - len(banner_labels_row)))
+            banner_ids_row.extend([""] * (len(cross_tab_df.columns) - len(banner_ids_row)))
+            
+            full_table = pd.concat([
+                metadata,
+                pd.DataFrame([[""] * len(cross_tab_df.columns)], columns=cross_tab_df.columns),
+                pd.DataFrame([banner_labels_row], columns=cross_tab_df.columns),
+                pd.DataFrame([banner_ids_row], columns=cross_tab_df.columns),
+                cross_tab_df
+            ], ignore_index=True)
+            
+            results.append(full_table)
+        
+        # Save the output
+        today = datetime.today().strftime('%m%d%Y')
+        file_name = f"DTV-010_Output_Python_Tab_{today}.csv"
+        
+        if results:
+            final_df = pd.concat(results, ignore_index=True)
+            final_df.to_csv(file_name, index=False, header=False)
+            final_df.to_csv("tabs_output.csv", index=False, header=False)
+            st.success(f"Output saved to {file_name}")
+        else:
+            st.warning("No tables were generated. Please add questions to the config.")
+            
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+ 
+# ----------------------
+# Display Current Questions
+# ----------------------
 st.markdown("### Current Questions in Database")
 st.json(questions)
+ 
